@@ -1,9 +1,5 @@
 import os
-import sys
-import json
 import time
-from weakref import ProxyType
-import socks
 import socket
 import sqlite3
 import argparse
