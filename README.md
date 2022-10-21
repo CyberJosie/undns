@@ -9,11 +9,11 @@ unDNS is a Python tool used to discover subdomains that may not have been found 
 
 # Download
 ```
-wget https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
+wget https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS/unDNS.py
 
 # Or
 
-curl -O https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
+curl -O https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS/unDNS.py
 ```
 
 # Install
