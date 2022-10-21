@@ -16,6 +16,10 @@ wget https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
 curl -O https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
 ```
 
+# Install
+```
+python3 -m pip install numpy
+```
 
 # Usage
 ```
