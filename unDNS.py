@@ -9,28 +9,6 @@ from threading import Lock
 from datetime import datetime
 from numpy import divide
 
-'''
-~ Scan Modes ~
-
-One or more scan modes can be used. Scan modes are just
-different ways to determine if the host is responsive at
-a given domain name. Depending on this user preferences
-this can be done differently
-
-DNS  - Performs a DNS lookup using the host system. Different
-        for windows/linux. Not exactly private.
-
-TCP - Attempts to open a TCP client socket connection at the host
-        at one or more ports (which the user will specify).
-        Proxied and Tor connections are available.
-    
-UDP - Attempts to open a UDP client socket connection at the host
-        at one or more ports (which the user will specify).
-        Proxied and Tor connections are available.
-
-8==D
-'''
-
 LOGO = '''
 {red} ▄▀▀▄ ▄▀▀▄  ▄▀▀▄ ▀▄{white}   ▄▀▀█▄▄   ▄▀▀▄ ▀▄  ▄▀▀▀▀▄ {reset}
 {red}█   █    █ █  █ █ █ {white} █ ▄▀   █ █  █ █ █ █ █   ▐ {reset}
