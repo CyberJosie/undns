@@ -7,6 +7,16 @@ unDNS is a Python tool used to discover subdomains that may not have been found 
 * **Test multiple targets at once** - Apply subdomains to multiple hosts with the same scan
 * **Persistent database** - Records are written to a SQLlite3 database regularly throughout scanning process so crashes/timeouts never result in lost progress
 
+# Download
+```
+wget https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
+
+# Or
+
+curl -O https://raw.githubusercontent.com/CyberJosie/undns/main/unDNS.py
+```
+
+
 # Usage
 ```
     
