@@ -1,10 +1,10 @@
-
 import os
 import time
 import socket
 import sqlite3
 import argparse
 import textwrap
+import random
 import threading
 from threading import Lock
 from datetime import datetime
@@ -66,7 +66,7 @@ def split(a: list, n):
     import numpy as np
     return [list(e) for e in np.array_split(a, n)]
 
-def process_workloads(paths, workers=1):
+def process_workloads(paths, workers=1, shuffle=False):
     subdomains = []
 
     # Read lines from all wordlists into one list
@@ -81,6 +81,9 @@ def process_workloads(paths, workers=1):
         except Exception as err:
             print('Error!\n An error was encountered while reading from wordlist file: \'{}\'\n{}'.format(wordlist_path, str(err)))
             continue
+    
+    if shuffle:
+        random.shuffle(subdomains)
 
     # Create worker workloads
     workloads = split(subdomains, workers)
@@ -106,6 +109,143 @@ def all_dead(workers):
         if w.is_alive():
             all_dead = False
     return all_dead
+
+class Queries:
+    def resolved_hosts(self, cursor):
+        query = 'SELECT * FROM `host` WHERE resolved = 1;'
+        cursor.execute(query)
+        res = []
+        try:
+            cursor.execute(query)
+            res = cursor.fetchall()
+        except Exception as err:
+            console_log('Error', str(err))
+            return []
+        return res
+    
+    def failed_hosts(self, cursor):
+        query = 'SELECT * FROM `host` WHERE resolved = 0;'
+        cursor.execute(query)
+        res = []
+        try:
+            cursor.execute(query)
+            res = cursor.fetchall()
+        except Exception as err:
+            console_log('Error', str(err))
+            return []
+        
+        return res
+    
+    def retrieve_all(self, cursor):
+        query = 'SELECT * FROM `host`;'
+        cursor.execute(query)
+        res = []
+        try:
+            cursor.execute(query)
+            res = cursor.fetchall()
+        except Exception as err:
+            console_log('Error', str(err))
+            return []
+        
+        # if len(res) >= 1:
+        #     return res[0]
+        
+        return res
+    
+    def domains(self, cursor):
+        domains = [row[1] for row in self.retrieve_all(cursor)]
+        return domains
+    
+    def hosts(self, cursor):
+        domains = self.domains(cursor)
+        hosts = []
+        for i in range(len(domains)):
+            hosts.append('.'.join(domains[i].split('.')[-2:]))
+        return [*set(hosts)]
+    
+    def addresses(self, cursor):
+        domains = [row[3] for row in self.retrieve_all(cursor) if row[3] != 'None']
+        return domains
+
+def inspect_mode(db_file):
+    help_menu = '''
+
+Command             Action
+
+resolved, .r        List all resolved hosts
+failed, .f          List all failed hosts
+domains, .d         List all domains
+hosts, .h           List unique host domains
+addresses, .a       List resolved addresses
+everything, .e      Show everything
+length, .l          Show database length
+.q                  Exit
+'''
+    if not os.path.isfile(db_file):
+        console_log('Error', 'Unable to find file: \'{}\''.format(db_file))
+        return
+    
+    db = None
+    try:
+        db = sqlite3.connect(db_file)
+    except Exception as err:
+        console_log('Error', 'Unable to open database.\n{}'.format(str(err)))
+        return
+    
+    if not db:
+        console_log('Error', 'Unexpected Error')
+        return
+    
+    cursor = db.cursor()
+    q = Queries()
+
+    print('Type \'help\' to show help.')
+    
+    while not None:
+        user_input = input('inspect> ')
+        output = ''
+        
+        if len(user_input) < 1 or user_input in ['',' ','\n']:
+            continue
+
+        args = [a.strip().replace('\n','') for a in user_input.split(' ')]
+
+        if len(args) >= 1:
+            if args[0] == 'resolved' or args[0] == '.r':
+                resolved = ['{}  {}\t{}'.format(row[0] if int(row[0]) >= 100 else str(row[0])+' ', row[3] if row[2] == 1 else 'None', row[1]) for row in q.resolved_hosts(cursor)]
+                output = 'Resolved Hosts\n\n' + '\n'.join(resolved)
+
+            elif args[0] == 'failed' or args[0] == '.f':
+                failed = ['{}  {}\t{}'.format(row[0] if int(row[0]) >= 100 else str(row[0])+' ', row[3] if row[2] == 1 else 'None', row[1]) for row in q.failed_hosts(cursor)]
+                output = 'Failed Hosts\n\n' + '\n'.join(failed)
+
+            elif args[0] == 'domains' or args[0] == '.d':
+                domains = q.domains(cursor)
+                output = 'Domains\n\n' + '\n'.join(domains)
+
+            elif args[0] == 'hosts' or args[0] == '.h':
+                hosts = q.hosts(cursor)
+                output = 'Hosts\n\n' + '\n'.join(hosts)
+
+            elif args[0] == 'addresses' or args[0] == '.a':
+                addresses = q.addresses(cursor)
+                output = 'Addresses\n\n' + '\n'.join(addresses)
+
+            elif args[0] == 'length' or args[0] == '.l':
+                output = '{} Entries'.format(len(q.retrieve_all(cursor)))
+            
+            elif args[0] == 'everything' or args[0] == '.e':
+                all = ['{}  {}\t{}'.format(row[0] if int(row[0]) >= 100 else str(row[0])+' ', row[3] if row[2] == 1 else 'None', row[1]) for row in q.retrieve_all(cursor)]
+                output = '{} Entries'.format('All Records\n' + '\n'.join(all))
+            
+            elif args[0] == '.q':
+                break
+            
+            else:
+                print(help_menu)
+        
+        if output != '':
+            print(output)
 
 
 class Database:
@@ -242,13 +382,12 @@ class SubdomainBruteforce:
                 time.sleep(.1)
 
 
-    def run_scan(self, wordlists:list, thread_count: int, scan_mode: list, proxy_host, proxy_port, port: int=443):
+    def run_scan(self, wordlists:list, thread_count: int, scan_mode: list, proxy_host, proxy_port, port: int=443, shuffle: bool=False):
         workers = []
         BAR = '************************************'
-
         print(" Processing wordlists and distributing workloads...", end=' ', flush=True)
         begin_time=time.time()
-        workloads, d_count = process_workloads(wordlists, workers=thread_count)
+        workloads, d_count = process_workloads(wordlists, workers=thread_count, shuffle=shuffle)
         time2=time.time()
         print("Finished! ({}s)".format(round(time2-begin_time,2)))
 
@@ -258,6 +397,7 @@ class SubdomainBruteforce:
         Scan Options
 
   Mode: {scan_mode}
+  Shuffle: {shuffle}
   Target Host(s): {targets}\n
   Wordlist(s): {wordlists}\n
   Total Words: {word_count}
@@ -271,6 +411,7 @@ class SubdomainBruteforce:
  {bar}
         """.format(
             bar=BAR,
+            shuffle='Yes' if shuffle else 'No',
             wordlists='\n\t       '.join(wordlists),
             scan_mode=scan_mode.upper(),
             targets='\n\t\t  '.join(self.hosts),
@@ -362,7 +503,16 @@ def main(args: argparse.Namespace):
     port = 443
     proxy_host=None
     proxy_port=None
+    shuffle=False
     threads = 1
+
+    # Enter inspect mode if specified by user
+    if args.inspect != None:
+        file_db = str(args.inspect)
+        if file_db[-3:] == '.db':
+            console_log('Info', 'Inspecting: \'{}\''.format(file_db))
+            inspect_mode(file_db)
+            exit()
 
     # Store hosts from arguments
     if args.hosts != None:
@@ -385,7 +535,10 @@ def main(args: argparse.Namespace):
     # Store scan mode from arguments
     if args.mode != None:
         mode = verify_mode(str(args.mode))
-        
+    
+
+    if args.shuffle != None:
+        shuffle = True
     
     subdns = SubdomainBruteforce(hosts)
     subdns.db.create_schema()
@@ -396,6 +549,7 @@ def main(args: argparse.Namespace):
         proxy_host=proxy_host,
         proxy_port=proxy_port,
         port=port,
+        shuffle=shuffle,
     )
 
 if __name__ == "__main__":
@@ -468,6 +622,26 @@ if __name__ == "__main__":
         Required: False
         Default: DNS
         \n''')
+    )
+
+    parser.add_argument('--inspect', '-I',
+        action='store',
+        type=str,
+        help=textwrap.dedent('''
+        Inspect Sqlite3 database output file
+
+        Required: False
+        Default: None
+        ''')
+    )
+
+    parser.add_argument('--shuffle', '-S',
+        action='store_true',
+        help=textwrap.dedent('''
+        Randomize the order of subdomains (no value)
+
+        Required: False
+        ''')
     )
 
     print(LOGO)
