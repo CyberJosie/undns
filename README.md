@@ -9,15 +9,6 @@ unDNS is a Python tool used to discover subdomains that may not have been found 
 
 # Usage
 ```
-
- ▄▀▀▄ ▄▀▀▄  ▄▀▀▄ ▀▄   ▄▀▀█▄▄   ▄▀▀▄ ▀▄  ▄▀▀▀▀▄ 
-█   █    █ █  █ █ █  █ ▄▀   █ █  █ █ █ █ █   ▐ 
-▐  █    █  ▐  █  ▀█  ▐ █    █ ▐  █  ▀█    ▀▄   
-  █    █     █   █     █    █   █   █  ▀▄   █  
-   ▀▄▄▄▄▀  ▄▀   █     ▄▀▄▄▄▄▀ ▄▀   █    █▀▀▀   
-           █    ▐    █     ▐  █    ▐    ▐      
-           ▐         ▐        ▐                
-
     
 usage: unDNS.py [-h] [--hosts HOSTS] [--wordlists WORDLISTS] [--threads THREADS] [--mode MODE]
 
