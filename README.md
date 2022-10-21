@@ -23,8 +23,9 @@ python3 -m pip install numpy
 
 # Usage
 ```
-    
+        
 usage: unDNS.py [-h] [--hosts HOSTS] [--wordlists WORDLISTS] [--threads THREADS] [--mode MODE]
+                [--inspect INSPECT] [--shuffle]
 
 Scan modes are the connection method used to determine
 whether or not a host is available at a given domain name.
@@ -69,6 +70,17 @@ optional arguments:
                         Required: False
                         Default: DNS
                         
+  --inspect INSPECT, -I INSPECT
+                        
+                        Inspect Sqlite3 database output file
+                        
+                        Required: False
+                        Default: None
+  --shuffle, -S         
+                        Randomize the order of subdomains (no value)
+                        
+                        Required: False
+
 
 ```
 
