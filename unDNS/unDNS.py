@@ -1,14 +1,15 @@
 import os
 import time
 import socket
+import random
 import sqlite3
 import argparse
 import textwrap
-import random
+import ipaddress
 import threading
+from numpy import divide
 from threading import Lock
 from datetime import datetime
-from numpy import divide
 
 LOGO = '''
 {red} ▄▀▀▄ ▄▀▀▄  ▄▀▀▄ ▀▄{white}   ▄▀▀█▄▄   ▄▀▀▄ ▀▄  ▄▀▀▀▀▄ {reset}
@@ -21,9 +22,8 @@ LOGO = '''
 
     '''.format(red="\u001b[31m",reset="\u001b[0m",white='\u001b[37m')
 
-
 TIME_FORMAT = '%d-%m-%y %H:%M:%S'
-
+BAR = '************************************'
 SUPPORTED_SCAN_MODES = [
     'DNS',
 ]
@@ -35,9 +35,7 @@ HOST_TABLE = """CREATE TABLE IF NOT EXISTS `host` (
     `address` VARCHAR(16)
 );
 """
-workloads = []
 
-# == BEGIN SUPPORT FUNCTIONS
 lock = Lock()
 
 def console_log(title, message):
@@ -49,17 +47,14 @@ def verify_mode(mode: str):
         mode = SUPPORTED_SCAN_MODES[0]
     return mode.upper()
 
-def remove_invalid_ports(ports: list):
-    for i in range(len(ports)):
-        # Ports are numbers so yeahh
-        if type(ports[i]) != int:
-            ports.pop(i)
-            continue
-        
-        # 1-65535
-        if ports[i] < 1 or ports[i] > 65535:
-            ports.pop(i)
-    return ports
+def is_valid_ip_address(ipv4):
+    yus = False
+    try:
+        ipaddress.IPv4Address(ipv4)
+        yus = True
+    except:
+        pass
+    return yus
 
 # Split a list into a number of (somewhat) evenly sized chunks
 def split(a: list, n):
@@ -111,60 +106,107 @@ def all_dead(workers):
     return all_dead
 
 class Queries:
-    def resolved_hosts(self, cursor):
+    # Returns resolved hosts from database
+    def resolved_hosts(self, cursor, threaded=False):
+        res = []
         query = 'SELECT * FROM `host` WHERE resolved = 1;'
-        cursor.execute(query)
-        res = []
+
+        if threaded:
+            lock.acquire(True)
+        
         try:
             cursor.execute(query)
             res = cursor.fetchall()
         except Exception as err:
             console_log('Error', str(err))
-            return []
+        
+        if threaded:
+            lock.release()
+
         return res
     
-    def failed_hosts(self, cursor):
+    # Count of resolved hosts 
+    def resolved_count(self, cursor, threaded=False):
+        return len(self.resolved_hosts(cursor, threaded))
+    
+    # Reads failed hosts from database
+    def failed_hosts(self, cursor, threaded=False):
+        res = []
         query = 'SELECT * FROM `host` WHERE resolved = 0;'
-        cursor.execute(query)
-        res = []
+
+        if threaded:
+            lock.acquire(True)
+        
         try:
             cursor.execute(query)
             res = cursor.fetchall()
         except Exception as err:
             console_log('Error', str(err))
-            return []
+
+        if threaded:
+            lock.release()
         
         return res
+
+    # Count of failed hosts 
+    def failed_count(self, cursor, threaded=False):
+        return len(self.failed_hosts(cursor, threaded))
     
-    def retrieve_all(self, cursor):
+    # Reads all records from database
+    def retrieve_all(self, cursor, threaded=False):
+        res = []
         query = 'SELECT * FROM `host`;'
-        cursor.execute(query)
-        res = []
+
+        if threaded:
+            lock.acquire(True)
+        
         try:
             cursor.execute(query)
             res = cursor.fetchall()
         except Exception as err:
             console_log('Error', str(err))
-            return []
         
-        # if len(res) >= 1:
-        #     return res[0]
+        if threaded:
+            lock.release()
         
         return res
     
-    def domains(self, cursor):
-        domains = [row[1] for row in self.retrieve_all(cursor)]
+    # Return the length of a table
+    def table_length(self, cursor, table, threaded=False):
+        res = []
+        sql_statement = 'SELECT COUNT(*) FROM {}'.format(table)
+
+        if threaded:
+            lock.acquire(True)
+        
+        try:
+            cursor.execute(sql_statement)
+            res = cursor.fetchall()
+        except Exception as err:
+            console_log('Error', str(err))
+
+        if threaded:
+            lock.release()
+        
+        count = int(res[0][0])
+        return count
+     
+    # Returns a full list of all domains in database
+    def domains(self, cursor, threaded=False):
+        domains = [row[1] for row in self.retrieve_all(cursor, threaded)]
         return domains
     
-    def hosts(self, cursor):
-        domains = self.domains(cursor)
+    # Returns a list of all unique hosts in database
+    def hosts(self, cursor, threaded=False):
+        domains = self.domains(cursor, threaded)
         hosts = []
         for i in range(len(domains)):
             hosts.append('.'.join(domains[i].split('.')[-2:]))
         return [*set(hosts)]
     
-    def addresses(self, cursor):
-        domains = [row[3] for row in self.retrieve_all(cursor) if row[3] != 'None']
+    # Returns all resolved addresses in database
+    def addresses(self, cursor, threaded=False):
+        domains = [row[3] for row in self.retrieve_all(cursor, threaded) if row[3] != 'None']
         return domains
 
 def inspect_mode(db_file):
@@ -248,88 +290,30 @@ length, .l          Show database length
             print(output)
 
 
+
 class Database:
+    '''
+    Database connector
+
+    This thread holds the database connection and functions that add records
+    For database reading and parsing, see class 'Queries'
+    '''
     def __init__(self, db):
         self.database_name = db
         self.conn = sqlite3.connect(self.database_name, check_same_thread=False)
         self.cursor = self.conn.cursor()
-
-    def table_length(self, table):
-        lock.acquire(True)
-        sql_statement = 'SELECT COUNT(*) FROM {}'.formatt(table)
-        self.cursor.execute(sql_statement)
-        res = []
-        
-        try:
-            res = self.cursor.fetchall()
-        except:
-            pass
-        lock.release()
-        count = int(res[0][0])
-        return count
-
-    def resolved_count(self):
-        lock.acquire(True)
-        sql_statement = 'SELECT * FROM `host` WHERE `resolved` == 1;'
-        self.cursor.execute(sql_statement)
-        res = []
-        
-        try:
-            res = self.cursor.fetchall()
-        except:
-            pass
-        lock.release()
-        
-        count = 0
-        if len(res) >= 1:
-            count = len(res)
-        
-        return count
-    
-    def failed_count(self):
-        lock.acquire(True)
-        sql_statement = 'SELECT * FROM `host` WHERE `resolved` == 0;'
-        self.cursor.execute(sql_statement)
-        res = []
-        try:
-            res = self.cursor.fetchall()
-        except:
-            pass
-        lock.release()
-        
-        count = 0
-        if len(res) >= 1:
-            count = len(res)
-        
-        return count
     
     def create_schema(self):
         print(" Creating database schema in \'{}\'".format(self.database_name), end='', flush=True)
-        # Create host table
         lock.acquire(True)
         self.cursor.execute(HOST_TABLE)
         self.conn.commit()
         lock.release()
         print(' Done!')
-    
-    def get_stored_domains(self):
-        lock.acquire(True)
-        sql_statement = 'SELECT * FROM `host`'
-        self.cursor.execute(sql_statement)
-        res = []
-        try:
-            res = self.cursor.fetchall()
-        except:
-            pass
-        lock.release()
-        
-        if len(res) == 1:
-            if len(res[0]) >= 1:
-                res = [e[1] for e in res]
-        return res
 
     def commit_result(self, domain: str, address: str, resolved: bool, verbose=False):
-        if domain in self.get_stored_domains():
+        q = Queries()
+        if domain in q.domains(self.cursor, True):
             return
         sql_statement = 'INSERT INTO `host` (`domain`,`resolved`,`address`) VALUES (?,?,?);'
         
@@ -341,16 +325,12 @@ class Database:
         ))
         self.conn.commit()
         lock.release()
-        
-
-# == END SUPPORT FUNCTIONS
 
 class SubdomainBruteforce:
     def __init__(self, hosts: list=[]):
         self.hosts = hosts
         self.database_name = 'scan_{}.db'.format(str(round(time.time())))
         self.db = Database(self.database_name)
-
 
     def _brute_worker(self, group_begin: float, workload: list, scan_mode: list, proxy_host: str, proxy_port: int,  port: int=443):
         subdomain_count = len(workload)
@@ -384,9 +364,10 @@ class SubdomainBruteforce:
 
     def run_scan(self, wordlists:list, thread_count: int, scan_mode: list, proxy_host, proxy_port, port: int=443, shuffle: bool=False):
         workers = []
-        BAR = '************************************'
-        print(" Processing wordlists and distributing workloads...", end=' ', flush=True)
+        query = Queries()
         begin_time=time.time()
+        
+        print(" Processing wordlists and distributing workloads...", end=' ', flush=True)
         workloads, d_count = process_workloads(wordlists, workers=thread_count, shuffle=shuffle)
         time2=time.time()
         print("Finished! ({}s)".format(round(time2-begin_time,2)))
@@ -440,7 +421,7 @@ class SubdomainBruteforce:
             pid = int(wt.native_id)
             workers.append(wt)
             print(" Done! (PID: {}, Workload Size: {})".format(str(pid), str(len(workloads[i]))))
-            time.sleep(2)
+            time.sleep(1)
         
         while not all_dead(workers):
             if input(' ').lower() == '?':
@@ -455,10 +436,10 @@ class SubdomainBruteforce:
         """.format(
             start=datetime.fromtimestamp(begin_time).strftime(TIME_FORMAT),
             elapsed=str(round(time.time()-begin_time)),
-            resolved_count=str(self.db.resolved_count()),
-            failed_count=str(self.db.failed_count()),
-            unique_count=str(len([*set(self.db.get_stored_domains())])),
-            checked=str(len(self.db.get_stored_domains())),
+            resolved_count=str(query.resolved_count(self.db.cursor, True)),
+            failed_count=str(query.failed_count(self.db.cursor, True)),
+            unique_count=str(len([*set(query.domains(self.db.cursor, True))])),
+            checked=str(query.table_length(self.db.cursor, 'host', True)),
             total=d_count,
             )
                 print(stats)
@@ -487,9 +468,9 @@ class SubdomainBruteforce:
             start=datetime.fromtimestamp(begin_time).strftime(TIME_FORMAT),
             finish=datetime.fromtimestamp(finish).strftime(TIME_FORMAT),
             elapsed=str(round(finish-begin_time)),
-            resolved_count=str(self.db.resolved_count()),
-            failed_count=str(self.db.failed_count()),
-            unique_count=str(len([*set(self.db.get_stored_domains())]))
+            resolved_count=str(query.resolved_count(self.db.cursor, True)),
+            failed_count=str(query.failed_count(self.db.cursor, True)),
+            unique_count=str(len([*set(query.domains(self.db.cursor, True))]))
             )
         print(scan_summary)
 
@@ -515,8 +496,8 @@ def main(args: argparse.Namespace):
             exit()
 
     # Store hosts from arguments
-    if args.hosts != None:
-        hosts = decomma(args.hosts)
+    if args.domains != None:
+        hosts = decomma(args.domains)
     else:
         console_log('Error', 'At least one host is required.')
         exit(1)
@@ -528,17 +509,26 @@ def main(args: argparse.Namespace):
         console_log('Error', "At least one wordlist is required.")
         exit(1)
     
+    # # Store proxy information
+    # if args.proxy_host != None:
+    #     # Ensure host is a valid IPv4 address
+    #     if is_valid_ip_address(args.proxy_host):
+    #         # Only continue if port is also set
+    #         if args.proxy_port != None:
+    #             proxy_host = str(args.proxy_host)
+    #             proxy_port = int(args.proxy_port)
+    #     # print error if no port is set
+    #     else:
+    #         console_log('Error', 'A port must also be specified if \'--proxy-host\' is set.')
+    #         exit(1)
+    
     # Store thread count from arguments
     if args.threads != None:
         threads = args.threads if type(args.threads) == int else 1
-    
-    # Store scan mode from arguments
-    if args.mode != None:
-        mode = verify_mode(str(args.mode))
-    
 
     if args.shuffle != None:
-        shuffle = True
+        if args.shuffle != False:
+            shuffle = True
     
     subdns = SubdomainBruteforce(hosts)
     subdns.db.create_schema()
@@ -560,13 +550,6 @@ if __name__ == "__main__":
         description=textwrap.dedent(f'''        
          Scan modes are the connection method used to determine
          whether or not a host is available at a given domain name.
-
-            * DNS - Use host DNS client to attempt domain resolution
-                    Not compatible with proxies. See operating system
-                    manual for more.
-            
-            * More sometime in the future lol
-
         '''),
 
         epilog=textwrap.dedent('''
@@ -574,74 +557,61 @@ if __name__ == "__main__":
         ''')
     )
 
-    parser.add_argument('--hosts', '-H',
+    parser.add_argument('--domains', '-d',
         action = 'store',
         type=str,
         help=textwrap.dedent('''
         One or more host domains to prefix with subdomains.
-        (Separate multiple elements with commas)
-
-        Required: True
-        Default: None
-        ''')
-    )
-
-    parser.add_argument('--wordlists', '-W',
-        action = 'store',
-        type=str,
-        help=textwrap.dedent('''
-        Path to one or more wordlists filled with newline separated subdomains.
-        Any non UTF-8 compatible elements will be ignored.
-        (Separate multiple elements with commas)
+        (Separate multiple domains with commas)
 
         Required: True
         Default: None
         \n''')
     )
 
-    parser.add_argument('--threads', '-T',
+    parser.add_argument('--wordlists', '-w',
+        action = 'store',
+        type=str,
+        help=textwrap.dedent('''
+        Path to one or more wordlists filled with newline separated subdomains. 
+        Any non UTF-8 compatible elements will be ignored.
+        (Separate multiple paths with commas)
+
+        Required: True
+        Default: None
+        \n''')
+    )
+
+    parser.add_argument('--threads', '-t',
         action = 'store',
         type=int,
         help=textwrap.dedent('''
         Number of concurrent threads to use.
-        Subdomains will be (somewhat) evenly distributed amongst threads.
+        Subdomains will be (somewhat) evenly distributed among threads.
 
         Required: False
         Default: 1
         \n''')
     )
-  
-    parser.add_argument('--mode', '-M',
-        action = 'store',
-        type=str,
-        help=textwrap.dedent('''
-        Scan modes to use for analysis.
-        All options: DNS (Work in progress)
-        (Separate multiple elements with commas)
 
-        Required: False
-        Default: DNS
-        \n''')
-    )
-
-    parser.add_argument('--inspect', '-I',
+    parser.add_argument('--inspect', '-i',
         action='store',
         type=str,
         help=textwrap.dedent('''
-        Inspect Sqlite3 database output file
+        Inspect Sqlite3 database output file.
 
         Required: False
         Default: None
-        ''')
+        \n''')
     )
 
-    parser.add_argument('--shuffle', '-S',
+    parser.add_argument('--shuffle', '-s',
         action='store_true',
         help=textwrap.dedent('''
         Randomize the order of subdomains (no value)
 
         Required: False
-        ''')
+        \n''')
     )
 
     print(LOGO)
