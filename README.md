@@ -112,4 +112,11 @@ $ python3 unDNS.py \
 ```
 
 ```
+$ python3 unDNS.py \
+> --domains example.com,example2.com \
+> -w ~/path/to/wordlist1.txt \
+> --web-socket --port 80 \
+> --proxy tor \
+> --threads 4 \
+> -s
 ```
