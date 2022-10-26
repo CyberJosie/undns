@@ -124,7 +124,7 @@ $ python3 unDNS.py \
 > -s
 ```
 
-## Inspect an output Sqlite file without knowing SQL
+Inspect an output Sqlite file without knowing SQL
 ```
 python3 unDNS.py --inspect scan_1666XXXXXX.db
 ```
