@@ -383,6 +383,7 @@ class SubdomainBruteforce:
                         result,
                         1,
                         True )
+                    print('\r', end='')
                     console_log('Resolved (DNS)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, result))
                 
                 elif scan_mode.upper() == 'WEBSOCKET':
@@ -396,6 +397,7 @@ class SubdomainBruteforce:
 
                     try:
                         response = requests.get(url, proxies=proxy)
+                        print('\r', end='')
                         console_log('Resolved (WebSocket)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, ))
                         result = response.status_code or 'None'
                         self.db.commit_result(
@@ -413,7 +415,7 @@ class SubdomainBruteforce:
             # Commit suicide if daddy says so
             if not qp.empty():
                 if 'die' in qp.get_nowait():
-                    console_log('Thread {}'.format(process_id), 'Dying...')
+                    console_log('Thread {}'.format(process_id), 'Killed')
                     break
                 
     
