@@ -3,11 +3,10 @@ import time
 import socket
 import random
 import sqlite3
-import argparse
-import textwrap
-import ipaddress
-import threading
 import requests
+import textwrap
+import argparse
+import threading
 from queue import Queue
 from numpy import divide
 from threading import Lock
@@ -354,7 +353,7 @@ class SubdomainBruteforce:
         self.db = Database(self.database_name)
 
     # Function that works as each child process
-    def _brute_worker(self, group_begin: float, workload: list, scan_mode: list, proxy: str, port: int=443):
+    def _brute_worker(self, process_id, group_begin: float, workload: list, scan_mode: list, proxy: str, port: int=443):
         subdomain_count = len(workload)
         begin_time = group_begin
 
@@ -396,7 +395,7 @@ class SubdomainBruteforce:
 
                     try:
                         response = requests.get(url, proxies=proxy)
-                        console_log('Resolved (HTTP)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, ))
+                        console_log('Resolved (WebSocket)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, ))
                         result = response.status_code or 'None'
                         self.db.commit_result(
                             full_domain_name,
@@ -413,7 +412,7 @@ class SubdomainBruteforce:
             # Commit suicide if daddy says so
             if not qp.empty():
                 if 'die' in qp.get_nowait():
-                    console_log('Thread', 'Dying...')
+                    console_log('Thread {}'.format(process_id), 'Dying...')
                     break
                 
     
@@ -470,6 +469,7 @@ class SubdomainBruteforce:
             print(" Starting new worker...", end='', flush=True)
             # Create a new thread
             wt = threading.Thread(target=self._brute_worker, args=(
+                str(i+1),
                 begin_time,
                 workloads[i],
                 scan_mode,
