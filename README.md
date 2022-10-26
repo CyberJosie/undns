@@ -103,6 +103,14 @@ https://github.com/CyberJosie/undns
 
 # Example Usage
 
+Run a quick scan on `example.com` over the host system DNS resolver for all subdomains in `wordlist1.txt`
+```
+$ python3 unDNS.py \
+> -u example.com \
+> -w ~/path/to/wordlist1.txt \
+> --threads 8 -s
+```
+
 Scan for all subdomains in `wordlist1.txt` and `wordlist2.txt` for host `google.com` using a web socket proxied over a local Tor connection. Subdomain order will be shuffled first.
 ```
 $ python3 unDNS.py \
