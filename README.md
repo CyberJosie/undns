@@ -102,6 +102,8 @@ https://github.com/CyberJosie/undns
 ```
 
 # Example Usage
+
+Scan for all subdomains in `wordlist1.txt` and `wordlist2.txt` for host `google.com` using a web socket proxied over a local Tor connection. Subdomain order will be shuffled first.
 ```
 $ python3 unDNS.py \
 > --domains google.com \
@@ -111,6 +113,7 @@ $ python3 unDNS.py \
 > --shuffle
 ```
 
+Scan all subdomains in `wordlist1.txt` for hosts `example.com` and `example2.com` using a proxies web socket on port 80 (HTTP) over a local Tor connection. Subdomain order will be shuffled first.
 ```
 $ python3 unDNS.py \
 > --domains example.com,example2.com \
@@ -119,4 +122,9 @@ $ python3 unDNS.py \
 > --proxy tor \
 > --threads 4 \
 > -s
+```
+
+## Inspect an output Sqlite file without knowing SQL
+```
+python3 unDNS.py --inspect scan_1666XXXXXX.db
 ```
