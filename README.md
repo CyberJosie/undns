@@ -23,64 +23,93 @@ python3 -m pip install numpy
 
 # Usage
 ```
-        
-usage: unDNS.py [-h] [--hosts HOSTS] [--wordlists WORDLISTS] [--threads THREADS] [--mode MODE]
-                [--inspect INSPECT] [--shuffle]
+    usage: unDNS.py [-h] [--domains DOMAINS] [--wordlists WORDLISTS] [--web-socket] [--port PORT] [--proxy PROXY] [--threads THREADS] [--inspect INSPECT] [--shuffle]
 
-Scan modes are the connection method used to determine
-whether or not a host is available at a given domain name.
+Scan Modes:
 
-   * DNS - Use host DNS client to attempt domain resolution
-           Not compatible with proxies. See operating system
-           manual for more.
+ Scan modes are different methods used to determine if a host is available
+ at a given domain. By default this program uses DNS which is dependant on
+ the host system. All options are below.
 
-   * More sometime in the future lol
+  * DNS - Makes DNS requests via the host DNS resolver. See '/etc/resolv.conf' 
+          for Linux.
+
+  * Web Socket - Attempts to connect to the host as if it were a webserver. 
+                 Proxied requests are available with this mode.
 
 optional arguments:
   -h, --help            show this help message and exit
-  --hosts HOSTS, -H HOSTS
+  --domains DOMAINS, -d DOMAINS
                         
                         One or more host domains to prefix with subdomains.
-                        (Separate multiple elements with commas)
+                        (Separate multiple domains with commas)
                         
                         Required: True
                         Default: None
-  --wordlists WORDLISTS, -W WORDLISTS
                         
-                        Path to one or more wordlists filled with newline separated subdomains.
+  --wordlists WORDLISTS, -w WORDLISTS
+                        
+                        Path to one or more wordlists filled with newline separated subdomains. 
                         Any non UTF-8 compatible elements will be ignored.
-                        (Separate multiple elements with commas)
+                        (Separate multiple paths with commas)
                         
                         Required: True
                         Default: None
                         
-  --threads THREADS, -T THREADS
+  --web-socket, -ws     
+                        Set this flag to use web socket mode.
+                        
+                        Required: False
+                        
+  --port PORT, -p PORT  
+                        Port to use with web socket
+                        
+                        Required: False
+                        Default: 443
+                        
+  --proxy PROXY, -x PROXY
+                        
+                        Proxy server to use for forwarding requests in web socket mode.
+                        Set 'tor' to use: socks5h://127.0.0.1:9050 (local Tor proxy).
+                        
+                        Required: False
+                        Default: None
+                        
+  --threads THREADS, -t THREADS
                         
                         Number of concurrent threads to use.
-                        Subdomains will be (somewhat) evenly distributed amongst threads.
+                        Subdomains will be (somewhat) evenly distributed among threads.
                         
                         Required: False
                         Default: 1
                         
-  --mode MODE, -M MODE  
-                        Scan modes to use for analysis.
-                        All options: DNS (Work in progress)
-                        (Separate multiple elements with commas)
+  --inspect INSPECT, -i INSPECT
                         
-                        Required: False
-                        Default: DNS
-                        
-  --inspect INSPECT, -I INSPECT
-                        
-                        Inspect Sqlite3 database output file
+                        Inspect Sqlite3 database output file.
                         
                         Required: False
                         Default: None
-  --shuffle, -S         
+                        
+  --shuffle, -s         
                         Randomize the order of subdomains (no value)
                         
                         Required: False
+                        
+
+https://github.com/CyberJosie/undns
 
 
 ```
 
+# Example Usage
+```
+$ python3 unDNS.py \
+> --domains google.com \
+> --wordlists ~/path/to/wordlist1.txt,~/path/to/wordlist2.txt \
+> --web-socket --proxy tor \
+> --threads 4 \
+> --shuffle
+```
+
+```
+```
