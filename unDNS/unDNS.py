@@ -486,9 +486,10 @@ class SubdomainBruteforce:
         
         # Console active during scan
         while not all_dead(workers):
+            user_input = input('> ').lower()
 
             # Show live statistics
-            if input(' ').lower() == '?':
+            if user_input == '?':
                 stats = """
  Start Time: {start}
  Elapsed: ~{elapsed} Seconds 
@@ -509,7 +510,7 @@ class SubdomainBruteforce:
                 print(stats)
             
             # Safely kill all workers
-            elif 'quit' in input(' ').lower() or 'q' in input(' ').lower():
+            elif 'quit' in user_input or 'q' in user_input:
                 console_log('Console', 'Killing Workers...')
                 while not all_dead(workers):
                     if not qp.full():
