@@ -21,7 +21,10 @@ LOGO = '''
 {red}           █    ▐   {white} █     ▐  █    ▐    ▐      {reset}
 {red}           ▐         {white}▐        ▐                {reset}
 
-    '''.format(red="\u001b[31m",reset="\u001b[0m",white='\u001b[37m')
+    '''.format(
+        red="\u001b[31m",
+        reset="\u001b[0m",
+        white='\u001b[37m' )
 
 # This format is used for time and date
 # https://docs.python.org/3/library/datetime.html#strftime-strptime-behavior
@@ -31,8 +34,7 @@ BAR = '************************************'    # its a bar
 
 SUPPORTED_SCAN_MODES = [
     'DNS',
-    'WEBSOCKET'
-]
+    'WEBSOCKET' ]
 
 # SQL statement for creating host table
 HOST_TABLE = """CREATE TABLE IF NOT EXISTS `host` (
@@ -58,7 +60,7 @@ Scan Modes:
 '''
 
 lock = Lock()
-qp = Queue(64)
+qp = Queue()
 
 # Prints a formatted message to the console with no buffers (im lazy sometimes ok...)
 def console_log(title, message):
@@ -355,7 +357,6 @@ class SubdomainBruteforce:
     # Function that works as each child process
     def _brute_worker(self, process_id, group_begin: float, workload: list, scan_mode: list, proxy: str, port: int=443):
         subdomain_count = len(workload)
-        begin_time = group_begin
 
         # Iterate through domains in job
         for sdns_idx in range(0, subdomain_count):
@@ -453,9 +454,9 @@ class SubdomainBruteforce:
         """.format(
             bar=BAR,
             shuffle='Yes' if shuffle else 'No',
-            wordlists='\n\t       '.join(wordlists),
+            wordlists='\n\t{}'.format(''.join([' ' for i in range(7)])).join(wordlists),
             scan_mode=scan_mode.upper(),
-            targets='\n\t\t  '.join(self.hosts),
+            targets='\n\t\t{}'.format(''.join([' ' for i in range(2)])).join(self.hosts),
             word_count=d_count,
             worker_count=thread_count,
             proxy=proxy if proxy != None else 'No Proxy',
