@@ -7,6 +7,8 @@ import argparse
 import textwrap
 import ipaddress
 import threading
+import requests
+from queue import Queue
 from numpy import divide
 from threading import Lock
 from datetime import datetime
@@ -22,12 +24,18 @@ LOGO = '''
 
     '''.format(red="\u001b[31m",reset="\u001b[0m",white='\u001b[37m')
 
-TIME_FORMAT = '%d-%m-%y %H:%M:%S'
-BAR = '************************************'
+# This format is used for time and date
+# https://docs.python.org/3/library/datetime.html#strftime-strptime-behavior
+TIME_FORMAT = '%d-%m-%y %H:%M:%S'   
+
+BAR = '************************************'    # its a bar
+
 SUPPORTED_SCAN_MODES = [
     'DNS',
+    'WEBSOCKET'
 ]
 
+# SQL statement for creating host table
 HOST_TABLE = """CREATE TABLE IF NOT EXISTS `host` (
     `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     `domain` VARCHAR(64) NOT NULL,
@@ -36,8 +44,24 @@ HOST_TABLE = """CREATE TABLE IF NOT EXISTS `host` (
 );
 """
 
-lock = Lock()
+MODE_SUMMARY = '''
+Scan Modes:
 
+ Scan modes are different methods used to determine if a host is available
+ at a given domain. By default this program uses DNS which is dependant on
+ the host system. All options are below.
+
+  * DNS - Makes DNS requests via the host DNS resolver. See '/etc/resolv.conf' 
+          for Linux.
+  
+  * Web Socket - Attempts to connect to the host as if it were a webserver. 
+                 Proxied requests are available with this mode.
+'''
+
+lock = Lock()
+qp = Queue(64)
+
+# Prints a formatted message to the console with no buffers (im lazy sometimes ok...)
 def console_log(title, message):
     print(' [ {} ] {}'.format(title,message))
 
@@ -47,29 +71,23 @@ def verify_mode(mode: str):
         mode = SUPPORTED_SCAN_MODES[0]
     return mode.upper()
 
-def is_valid_ip_address(ipv4):
-    yus = False
-    try:
-        ipaddress.IPv4Address(ipv4)
-        yus = True
-    except:
-        pass
-    return yus
-
 # Split a list into a number of (somewhat) evenly sized chunks
 def split(a: list, n):
     import numpy as np
     return [list(e) for e in np.array_split(a, n)]
 
+# Read all wordlists and prepare workloads for workers
 def process_workloads(paths, workers=1, shuffle=False):
     subdomains = []
 
     # Read lines from all wordlists into one list
     for wordlist_path in paths:
+        # Make sure the wordlist is a file
         if not os.path.isfile(wordlist_path):
             print('Error!\n Path to wordlist was not found: \'{}\''.format(wordlist_path))
             continue
         
+        # Read from the wordlist and skip if failed
         try:
             with open(wordlist_path, 'r', encoding='utf8', errors='ignore') as wf:
                 [subdomains.append(line.replace('\n','')) for line in wf.readlines() if line not in ['',' ','\n','\t']]
@@ -77,6 +95,7 @@ def process_workloads(paths, workers=1, shuffle=False):
             print('Error!\n An error was encountered while reading from wordlist file: \'{}\'\n{}'.format(wordlist_path, str(err)))
             continue
     
+    # Shuffle the order 
     if shuffle:
         random.shuffle(subdomains)
 
@@ -84,6 +103,7 @@ def process_workloads(paths, workers=1, shuffle=False):
     workloads = split(subdomains, workers)
     return workloads, len(subdomains)
 
+# Simply creates a list from a string of comma delimeted items
 def decomma(comma_separated_stuff: str):
     return [e.strip().replace('\n','') for e in comma_separated_stuff.split(',')]
 
@@ -105,6 +125,7 @@ def all_dead(workers):
             all_dead = False
     return all_dead
 
+# Quick DB queries for reading
 class Queries:
     # Returns resolved hosts from database
     def resolved_hosts(self, cursor, threaded=False):
@@ -209,6 +230,7 @@ class Queries:
         domains = [row[3] for row in self.retrieve_all(cursor, threaded) if row[3] != 'None']
         return domains
 
+# Use this mode to inspect a DB file or recover data from a crashed scan
 def inspect_mode(db_file):
     help_menu = '''
 
@@ -290,7 +312,6 @@ length, .l          Show database length
             print(output)
 
 
-
 class Database:
     '''
     Database connector
@@ -332,7 +353,8 @@ class SubdomainBruteforce:
         self.database_name = 'scan_{}.db'.format(str(round(time.time())))
         self.db = Database(self.database_name)
 
-    def _brute_worker(self, group_begin: float, workload: list, scan_mode: list, proxy_host: str, proxy_port: int,  port: int=443):
+    # Function that works as each child process
+    def _brute_worker(self, group_begin: float, workload: list, scan_mode: list, proxy: str, port: int=443):
         subdomain_count = len(workload)
         begin_time = group_begin
 
@@ -356,22 +378,59 @@ class SubdomainBruteforce:
                         continue
                     
                     # Log Successful lookup
-                    self.db.commit_result(full_domain_name, result, 1, True)
+                    self.db.commit_result(
+                        full_domain_name,
+                        result,
+                        1,
+                        True )
                     console_log('Resolved (DNS)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, result))
+                
+                elif scan_mode.upper() == 'WEBSOCKET':
+
+                    if port == 443:
+                        url = 'https://{}'.format(full_domain_name)
+                    elif port == 80:
+                        url = 'http://{}'.format(full_domain_name)
+                    else:
+                        url = 'https://{}:{}'.format(full_domain_name, port)
+
+                    try:
+                        response = requests.get(url, proxies=proxy)
+                        console_log('Resolved (HTTP)', 'Got connection from \'{}\' -> {}'.format(full_domain_name, ))
+                        result = response.status_code or 'None'
+                        self.db.commit_result(
+                            full_domain_name,
+                            result,
+                            1,
+                            True )
+                        
+                    except:
+                        self.db.commit_result(full_domain_name, 'None', 0, verbose=False)
+                        continue
 
                 time.sleep(.1)
-
-
-    def run_scan(self, wordlists:list, thread_count: int, scan_mode: list, proxy_host, proxy_port, port: int=443, shuffle: bool=False):
+            
+            # Commit suicide if daddy says so
+            if not qp.empty():
+                if 'die' in qp.get_nowait():
+                    console_log('Thread', 'Dying...')
+                    break
+                
+    
+    # Initiated the scan with the available parameters
+    # This function waits for all child processes to finish and controls the console interface in between
+    def run_scan(self, wordlists:list, thread_count: int, scan_mode: list, proxy, port: int=443, shuffle: bool=False):
         workers = []
         query = Queries()
         begin_time=time.time()
         
+        # Create workloads for all workers without duplicated
         print(" Processing wordlists and distributing workloads...", end=' ', flush=True)
         workloads, d_count = process_workloads(wordlists, workers=thread_count, shuffle=shuffle)
         time2=time.time()
         print("Finished! ({}s)".format(round(time2-begin_time,2)))
 
+        # Scan Options for initial summary (Basically what you set at the cli)
         scan_options = """
  {bar}
 
@@ -382,12 +441,14 @@ class SubdomainBruteforce:
   Target Host(s): {targets}\n
   Wordlist(s): {wordlists}\n
   Total Words: {word_count}
-  Proxy Host: {phost}
-  Proxy Port: {pport}
+  Proxy: {proxy}
   Worker Count: {worker_count}
 
   INFO: Type '?' at any time to view
         live scan statistics.
+
+        Type 'quit' to end threads 
+        properly and then exit.
 
  {bar}
         """.format(
@@ -398,8 +459,7 @@ class SubdomainBruteforce:
             targets='\n\t\t  '.join(self.hosts),
             word_count=d_count,
             worker_count=thread_count,
-            phost=proxy_host if proxy_host != None else 'No Proxy',
-            pport=proxy_port if proxy_port != None else 'No Proxy',
+            proxy=proxy if proxy != None else 'No Proxy',
             )
         
         print(scan_options)
@@ -408,22 +468,26 @@ class SubdomainBruteforce:
         # Spawn workers
         for i in range(thread_count):
             print(" Starting new worker...", end='', flush=True)
+            # Create a new thread
             wt = threading.Thread(target=self._brute_worker, args=(
                 begin_time,
                 workloads[i],
                 scan_mode,
-                proxy_host,
-                proxy_port,
-                port
+                proxy,
+                port,
                 ))
             wt.daemon = True
             wt.start()
+            # Store PID and add to worker set
             pid = int(wt.native_id)
             workers.append(wt)
             print(" Done! (PID: {}, Workload Size: {})".format(str(pid), str(len(workloads[i]))))
             time.sleep(1)
         
+        # Console active during scan
         while not all_dead(workers):
+
+            # Show live statistics
             if input(' ').lower() == '?':
                 stats = """
  Start Time: {start}
@@ -443,9 +507,15 @@ class SubdomainBruteforce:
             total=d_count,
             )
                 print(stats)
-
-        
-        
+            
+            # Safely kill all workers
+            elif 'quit' in input(' ').lower() or 'q' in input(' ').lower():
+                console_log('Console', 'Killing Workers...')
+                while not all_dead(workers):
+                    if not qp.full():
+                        qp.put_nowait('die')
+                console_log('Console', 'All workers have moved on to a better place.')
+    
         finish=time.time()
         console_log('Finished', 'Scan completed ({})'.format(str(round(finish-begin_time,2))))
 
@@ -482,8 +552,7 @@ def main(args: argparse.Namespace):
     wordlists = []
     mode = 'DNS'
     port = 443
-    proxy_host=None
-    proxy_port=None
+    proxy=None
     shuffle=False
     threads = 1
 
@@ -509,18 +578,24 @@ def main(args: argparse.Namespace):
         console_log('Error', "At least one wordlist is required.")
         exit(1)
     
-    # # Store proxy information
-    # if args.proxy_host != None:
-    #     # Ensure host is a valid IPv4 address
-    #     if is_valid_ip_address(args.proxy_host):
-    #         # Only continue if port is also set
-    #         if args.proxy_port != None:
-    #             proxy_host = str(args.proxy_host)
-    #             proxy_port = int(args.proxy_port)
-    #     # print error if no port is set
-    #     else:
-    #         console_log('Error', 'A port must also be specified if \'--proxy-host\' is set.')
-    #         exit(1)
+    # Set web socket mode
+    if args.web_socket != None and args.web_socket != False:
+        mode = 'WebSocket'
+    
+    # Web socket port
+    if args.port != None:
+        try:
+            port = int(args.port)
+        except:
+            pass
+    
+    # Store proxy information
+    if args.proxy != None:
+        if type(args.proxy) == str:
+            if 'tor' in args.proxy.strip().lower():
+                proxy = 'socks5h://127.0.0.1:9050'
+            else:
+                proxy = args.proxy
     
     # Store thread count from arguments
     if args.threads != None:
@@ -530,14 +605,14 @@ def main(args: argparse.Namespace):
         if args.shuffle != False:
             shuffle = True
     
+    # begin
     subdns = SubdomainBruteforce(hosts)
     subdns.db.create_schema()
     subdns.run_scan(
         wordlists=wordlists,
         thread_count=threads,
         scan_mode=mode,
-        proxy_host=proxy_host,
-        proxy_port=proxy_port,
+        proxy=proxy,
         port=port,
         shuffle=shuffle,
     )
@@ -547,10 +622,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog='unDNS.py',
         formatter_class=argparse.RawTextHelpFormatter,
-        description=textwrap.dedent(f'''        
-         Scan modes are the connection method used to determine
-         whether or not a host is available at a given domain name.
-        '''),
+        description=textwrap.dedent('''
+         {ms}
+        '''.format(
+            ms=MODE_SUMMARY,
+        )),
 
         epilog=textwrap.dedent('''
         https://github.com/CyberJosie/undns
@@ -578,6 +654,37 @@ if __name__ == "__main__":
         (Separate multiple paths with commas)
 
         Required: True
+        Default: None
+        \n''')
+    )
+
+    parser.add_argument('--web-socket', '-ws',
+        action='store_true',
+        help=textwrap.dedent('''
+        Set this flag to use web socket mode.
+
+        Required: False
+        \n''')
+    )
+
+    parser.add_argument('--port', '-p',
+        action='store',
+        type=int,
+        help=textwrap.dedent('''
+        Port to use with web socket
+
+        Required: False
+        Default: 443
+        \n''')
+    )
+
+    parser.add_argument('--proxy', '-x',
+        action='store',
+        help=textwrap.dedent('''
+        Proxy server to use for forwarding requests in web socket mode.
+        Set 'tor' to use: socks5h://127.0.0.1:9050 (local Tor proxy).
+
+        Required: False
         Default: None
         \n''')
     )
